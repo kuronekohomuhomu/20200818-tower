@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>タワーゲーム</title>
+<script src="Box2D.js"></script>
+<script>
+let canvas, context;
+let world, w, h;
+let bodyDef, fixDef;
+const blocks = new Array();
+let selectBlock = null;
+let mouseDown = false;
+const scale = 10;
+const b2Vec2 = Box2D.Common.Math.b2Vec2;
+const color = ["#FF3333", "#33FF33", "#3333FF", "#FFFF33"];
+
+const init = () => {
+    // キャンバスの取得
+    canvas = document.getElementById("field");
+    context = canvas.getContext("2d");
+    // 物理ワールド（重力加速度: 9.8)
+    world = new Box2D.Dynamics.b2World(new b2Vec2(0, 9.8), true);
+    [w, h] = [canvas.width/scale, canvas.height/scale];
+    // 物体、形状の定義
+    bodyDef = new Box2D.Dynamics.b2BodyDef;
+    fixDef = new Box2D.Dynamics.b2FixtureDef;
+    fixDef.shape = new Box2D.Collision.Shapes.b2PolygonShape;
+    [fixDef.density, fixDef.friction, fixDef.restitution] = [1, 1, 0.1];
+    // 地面、壁
+    setBox(w/2, h, w/2, 1);
+    setBox(0, h-5, 1, 5);
+    setBox(w, h-5, 1, 5);
+    // ブロック
+    for (let i = 0; i < 16; i++) {
+        const [x, n] = [i*3+5, (i%4)+3];
+        blocks.push({"object":setPolygon(x, 30, n), "n":n});
+    }
+    // マウスイベントの登録
+    document.addEventListener("mousedown", startDrag);
+    document.addEventListener("mousemove", drag);
+    document.addEventListener("mouseup", drop);
+    // ゲーム開始
+    setInterval(update, 1000/60);
+}
+
+const setBox = (x, y, w, h) => {
+    // 四角形の作成
+    bodyDef.type = Box2D.Dynamics.b2Body.b2_staticBody;
+    fixDef.shape.SetAsBox(w, h);
+    const box = world.CreateBody(bodyDef);
+    box.CreateFixture(fixDef);
+    box.SetPosition(new b2Vec2(x, y));
+}
+
+const setPolygon = (x, y, n) => {
+    // n角形の作成
+    bodyDef.type = Box2D.Dynamics.b2Body.b2_dynamicBody;
+    const points = new Array(n);
+    for (let i = 0; i < n; i++) {
+        const px = 2 * Math.cos(i/n * Math.PI*2);
+        const py = 2 * Math.sin(i/n * Math.PI*2);
+        points[i] = new b2Vec2(px, py);
+    }
+    fixDef.shape.SetAsArray(points, n);
+    const polygon = world.CreateBody(bodyDef);
+    polygon.CreateFixture(fixDef);
+    polygon.SetPosition(new b2Vec2(x, y));
+    return polygon;
+}
+
+const update = () => {
+    // 物理ワールドを更新
+    world.Step(1/60, 10, 10);
+    world.ClearForces();
+    // 地面、壁の描画
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.fillStyle = "#CC9933";
+    context.fillRect(0, (h-1)*scale, canvas.width, 1*scale);
+    context.fillRect(0, (h-10)*scale, 1*scale, 10*scale);
+    context.fillRect((w-1)*scale, (h-10)*scale, 1*scale, 10*scale);
+    // ブロックの描画
+    for (const block of blocks) {
+        const x = block.object.GetPosition().x * scale;
+        const y = block.object.GetPosition().y * scale;
+        context.save();
+        context.translate(x, y);
+        context.rotate(block.object.GetAngle());
+        context.fillStyle = color[block.n - 3];
+        context.strokeStyle = "#000000";
+        context.beginPath();
+        for (let i = 0; i < block.n; i++) {
+            const px = 2 * scale * Math.cos(i/block.n * Math.PI*2);
+            const py = 2 * scale * Math.sin(i/block.n * Math.PI*2);
+            if (i == 0) {
+                context.moveTo(px, py);
+            } else {
+                context.lineTo(px, py);
+            }
+        }
+        context.closePath();
+        context.fill();
+        context.stroke();
+        context.restore();
+    }
+    // 高さの表示
+    let minH = h;
+    for (const block of blocks) {
+        const y = block.object.GetPosition().y;
+        if ((block.object != selectBlock) && (y < minH)) minH = y;
+    }
+    document.getElementById("height").innerText = Math.round(h-1-minH);
+}
+
+const startDrag = event => {
+    // ブロックをつかむ
+    const rect = event.target.getBoundingClientRect();
+    const x = (event.clientX - rect.left) / scale;
+    const y = (event.clientY - rect.top) / scale;
+    if (selectBlock == null) {
+        // ブロックを選択
+        let minD = w;
+        for (const block of blocks) {
+            const ox = block.object.GetPosition().x;
+            const oy = block.object.GetPosition().y;
+            const d = ((x - ox) ** 2 + (y - oy) ** 2) ** 0.5;
+            if ((d < 2) && (d < minD)) {
+                selectBlock = block.object;
+                minD = d;
+            }
+        }
+        // カーソル位置にブロックを移動
+        if (selectBlock != null) {
+            selectBlock.SetAwake(false);
+            selectBlock.SetPosition(new b2Vec2(x, y));
+            mouseDown = true;
+        }
+    }
+}
+
+const drag = event => {
+    // ブロックを動かす
+    const rect = event.target.getBoundingClientRect();
+    const x = (event.clientX - rect.left) / scale;
+    const y = (event.clientY - rect.top) / scale;
+    if ((mouseDown) && (selectBlock != null)) {
+        selectBlock.SetAwake(false);
+        selectBlock.SetPosition(new b2Vec2(x, y));
+    }
+}
+
+const drop = event => {
+    // ブロックを放す
+    if ((mouseDown) && (selectBlock != null)) {
+        selectBlock.SetAwake(true);
+        mouseDown = false;
+        selectBlock = null;
+    }
+}
+
+const reset = () => {
+    // ブロックを下の位置に戻す
+    for (let i = 0; i < blocks.length; i++) {
+        blocks[i].object.SetAwake(false);
+        blocks[i].object.SetPosition(new b2Vec2(i*3+5, 30));
+        blocks[i].object.SetAwake(true);
+    }
+}
+</script>
+</head>
+<body onload="init()">
+<p>タワーゲーム</p>
+<input type="button" value="はじめから" onclick="reset()">
+高さ：<span id="height"></span>
+<hr>
+<canvas id="field" width="600" height="600"></canvas>
+</body>>
+</html>
